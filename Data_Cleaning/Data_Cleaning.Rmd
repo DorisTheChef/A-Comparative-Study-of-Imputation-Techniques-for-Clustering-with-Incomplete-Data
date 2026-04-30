@@ -5,6 +5,7 @@ date: "2026-04-26"
 ---
 
 ```{r, results='hide'}
+setwd("/Users/baixuezhang/Documents/SJSU/study/Math 252_Cluster_Analysis/project")
 library(tidyverse)
 data = read_csv("Raw Data.csv")
 ```
