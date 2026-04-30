@@ -1,3 +1,4 @@
+
 base_path <- "Datasets/V1"
 
 baseline <- read.csv(file.path(base_path, "data_complete_baseline_V1.csv"))
@@ -69,6 +70,9 @@ na_summary <- lapply(datasets, function(df) {
 
 na_summary
 # all of them only have NAs in income(11 rows) now
+
+# baseline dataset
+write.csv(baseline, "Datasets/V2/data_complete_baseline.csv", row.names = FALSE)
 
 #mode imputation for inome
 # 1. Mode function
