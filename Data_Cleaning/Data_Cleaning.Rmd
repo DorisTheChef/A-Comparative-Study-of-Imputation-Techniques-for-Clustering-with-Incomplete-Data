@@ -1,0 +1,328 @@
+---
+title: "Data Cleaning"
+output: html_document
+date: "2026-04-26"
+---
+
+```{r, results='hide'}
+library(tidyverse)
+data = read_csv("Raw Data.csv")
+```
+
+```{r}
+# find size and missing value counts
+data <- read_csv("Raw Data.csv", na = c("NA", "#N/A"))
+data |>
+  summarise(across(everything(), ~ sum(is.na(.)))) |>
+  pivot_longer(cols = everything(),
+               names_to = "variable",
+               values_to = "n_missing") |>
+  mutate(pct_missing = n_missing / nrow(data) * 100) |>
+  print(n = Inf)
+
+```
+
+```{r}
+# check how many AssignmentId are there
+data |>
+  summarise(n_unique = n_distinct(AssignmentId))
+#AssignmentId has 792 unique ID, so it's also useless
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+data |>
+  summarise(n_unique = n_distinct(HITTypeId))
+# same, useless
+```
+
+```{r}
+data |>
+  summarise(n_unique = n_distinct(Reward))
+# all of them are 0.25
+
+```
+```{r}
+unique(data$MaxAssignments)
+# [1] 203 193 200 100 220 173 maybe a batch indicator
+
+```
+
+```{r}
+unique(data$CreationTime)
+#[1] "Tue Sep 25 12:15:58 PDT 2018" "Tue Sep 25 10:44:25 PDT 2018" "Fri Sep 21 15:08:08 PDT 2018"
+#[4] "Fri Sep 21 11:31:30 PDT 2018" "Fri Jun 22 14:01:52 PDT 2018" "Thu Jun 21 11:46:58 PDT 2018"
+#[7] "Fri Jun 22 08:58:59 PDT 2018"
+
+# 7 batches of questionaires categorical variable, use this as batch indicator,remove maxassignments
+
+```
+```{r}
+# change creation time to 7 categories
+data <- data |>
+  mutate(
+    batch = factor(CreationTime),
+    batch = factor(batch, labels = letters[1:nlevels(batch)])
+  ) |>
+  dplyr::select(-CreationTime)
+```
+
+```{r}
+unique(data$AcceptTime...7)
+# AcceptTime is useless
+unique(data$AcceptTime...16)
+
+```
+
+```{r}
+unique(data$SubmitTime)
+# submit time has more than 600 unique values, useless
+
+unique(data$Answer.surveycode)
+# useless everyone has a unique code
+```
+
+
+```{r}
+#remove 27,28,WorkerId,IPAddress,LocationLatitude,LocationLongitude,AssignmentId, etc
+clean_data <- data |>
+  dplyr::select(-dplyr::any_of(c(
+    "...27", "...28",
+    "WorkerId", "IPAddress",
+    "LocationLatitude", "LocationLongitude",
+    "AssignmentId","HITTypeId","Reward","AcceptTime...7", "AcceptTime...16","MaxAssignments","SubmitTime","Answer.surveycode"
+    )))
+
+```
+```{r}
+# Time spent
+library(ggplot2)
+data |>
+  ggplot(aes(x = `WorkTimeInSeconds...9`)) +
+  geom_histogram(bins = 30) +
+  labs(
+    title = "Distribution of Work Time (Seconds)",
+    x = "Time (seconds)",
+    y = "Count"
+  )
+
+```
+
+```{r}
+# how fast was the fastest person finish this questionaire
+data |>
+  summarise(min_time = min(`WorkTimeInSeconds...9`, na.rm = TRUE))
+# 3 seconds. not a reliable observation
+
+# how many people spent less than 10 seconds
+data |>
+  summarise(n_less_5 = sum(`WorkTimeInSeconds...9` < 10, na.rm = TRUE))
+#only one. good. keep this variable as a reference
+```
+
+
+```{r}
+# variable multiplier
+data |>
+  ggplot(aes(x = multiplier)) +
+  geom_bar() +
+  labs(
+    title = "Count of Each Multiplier Value",
+    x = "Multiplier",
+    y = "Count"
+  )
+
+```
+
+
+```{r}
+# age
+unique(data$age)
+#[1] "60-69"               "18-29"               "30-39"               "50-59"               "40-49"              
+#[6] "70 or over"          "Prefer not to state"
+
+```
+
+```{r}
+clean_data |>
+  count(gender)
+```
+
+```{r}
+clean_data |>
+  count(income)
+```
+
+
+```{r}
+library(ggplot2)
+
+clean_data |>
+  ggplot(aes(
+    x = `Q8_1 On a scale of 0 to 100, how would you describe your religious orientation?`,
+    y = amount
+  )) +
+  geom_point() +
+  labs(
+    title = "Amount vs Religious Orientation",
+    x = "Religious Orientation (0–100)",
+    y = "Amount Donated"
+  )
+
+```
+```{r}
+model1 <- clean_data |>
+  lm(amount ~ `Q8_1 On a scale of 0 to 100, how would you describe your religious orientation?`, data = _)
+
+summary(model1)
+
+```
+```{r}
+clean_data |>
+  ggplot(aes(
+    x = `Q8_1 On a scale of 0 to 100, how would you describe your religious orientation?`,
+    y = amount
+  )) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Linear Fit: Amount vs Religiosity",
+    x = "Religiosity (0–100)",
+    y = "Amount Donated"
+  )
+
+```
+```{r}
+clean_data |>
+  ggplot(aes(
+    x = `Q3_1 On a scale of 0 to 100, how would you describe your political views?`,
+    y = amount
+  )) +
+  geom_point() +
+  labs(
+    title = "Amount vs political views",
+    x = "Religious Orientation (0–100)",
+    y = "Amount Donated"
+  )
+
+```
+
+```{r}
+model2 <- clean_data |>
+  lm(amount ~ `Q3_1 On a scale of 0 to 100, how would you describe your political views?`, data = _)
+
+summary(model2)
+
+
+```
+
+```{r}
+clean_data |>
+  ggplot(aes(
+    x = `Q3_1 On a scale of 0 to 100, how would you describe your political views?`,
+    y = amount
+  )) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Linear Fit: Amount vs political views",
+    x = "political views (0–100)",
+    y = "Amount Donated"
+  )
+
+```
+
+
+```{r}
+clean_data |>
+  ggplot(aes(
+    x = `Q8 Aside from weddings and funerals, how often do you attend religious services?`,
+    y = amount
+  )) +
+  geom_point() +
+  labs(
+    title = "Amount vs political views",
+    x = "Religious services frequency",
+    y = "Amount Donated"
+  )
+
+```
+
+```{r}
+model3 <- clean_data |>
+  lm(amount ~ `Q8 Aside from weddings and funerals, how often do you attend religious services?`, data = _)
+
+summary(model2)
+```
+
+
+```{r}
+clean_data |>
+  ggplot(aes(
+    x = `Q3_1 On a scale of 0 to 100, how would you describe your political views?`,
+    y = amount
+  )) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Linear Fit: Amount vs Religious services frequency",
+    x = "Religious services frequency",
+    y = "Amount Donated"
+  )
+```
+```{r}
+# missing values
+clean_data |>
+  summarise(across(everything(), ~ sum(is.na(.)))) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "n_missing"
+  ) |>
+  mutate(pct_missing = n_missing / nrow(clean_data) * 100) |>
+  arrange(desc(n_missing)) |>
+  print(n = Inf)
+```
+
+```{r}
+# check the number of "Perfer not the state"
+library(tidyr)
+
+clean_data |>
+  summarise(across(everything(),
+                   ~ sum(. == "Prefer not to state", na.rm = TRUE))) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "column",
+    values_to = "count"
+  ) |>
+  filter(count > 0)
+
+```
+```{r}
+clean_data <- clean_data |>
+  mutate(
+    age = na_if(age, "Prefer not to state"),
+    income = na_if(income, "Prefer not to state")
+  )
+```
+
+```{r}
+library(dplyr)
+
+clean_data <- clean_data |>
+  mutate(
+    gender = recode(gender,
+                    "Other / Prefer not to state" = "Other")
+  )
+```
+
+```{r}
+library(readr)
+
+write_csv(clean_data, "clean_data.csv")
+
+```
