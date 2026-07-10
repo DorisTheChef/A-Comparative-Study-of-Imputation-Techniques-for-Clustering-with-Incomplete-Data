@@ -1,0 +1,1206 @@
+---
+title: "MATH252 Group Project"
+format:
+  pdf:
+    keep-tex: true
+editor: visual
+execute:
+  echo: false
+  warning: false
+---
+
+## Install Libraries and Functions
+
+```{r}
+# install libraries
+library(tidyverse)
+library(factoextra)   # fviz_dist(), hopkins()
+library(cluster)      # daisy() for Gower distance on mixed data
+library(knitr)
+library(kableExtra)
+library(hopkins)
+
+library(conflicted)
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(dplyr::mutate)
+```
+
+```{r}
+# ── Split into continuous and categorical subsets ─────────────────────────────
+split_vars <- function(df) {
+
+  df_cont <- df |>
+    select(
+      starts_with("work_time_in_seconds"),
+      multiplier,
+      amount,
+      starts_with("q3_1"),
+      starts_with("q8_1")
+    ) |>
+    drop_na() |>
+    mutate(across(everything(), as.numeric))
+
+  df_cat <- df |>
+    select(
+      age, gender, income,
+      starts_with("q5"),
+      starts_with("q9"),
+      starts_with("q7"),
+      starts_with("q8_aside")
+    ) |>
+    drop_na() |>
+    mutate(across(everything(), as.factor))
+
+  list(continuous = df_cont, categorical = df_cat)
+}
+
+# ── Hopkins statistic for both subsets ───────────────────────────────────────
+compute_hopkins <- function(split, seed = 420) {
+  cont_scaled <- split$continuous |> scale() |> as.data.frame()
+  set.seed(seed)
+  h_cont <- hopkins(cont_scaled, nrow(cont_scaled) - 1)
+
+  gower_d <- daisy(split$categorical, metric = "gower")
+  k_dims  <- min(5, ncol(split$categorical) - 1)
+  mds_mat <- cmdscale(gower_d, k = k_dims) |> as.data.frame()
+  set.seed(seed)
+  h_cat <- hopkins(mds_mat, nrow(mds_mat) - 1)
+
+  list(H_continuous = round(h_cont, 4),
+       H_categorical = round(h_cat, 4))
+}
+
+# ── VAT plots via fviz_dist() ─────────────────────────────────────────────────
+plot_vat <- function(split, label, hop_vals, max_n = 300, seed = 420) {
+  cont_data <- split$continuous |> scale() |> as.data.frame()
+  if (nrow(cont_data) > max_n) {
+    set.seed(seed); cont_data <- cont_data[sample(nrow(cont_data), max_n), ]
+  }
+
+  p_cont <- fviz_dist(
+    dist(cont_data, method = "euclidean"),
+    order = TRUE, show_labels = FALSE,
+    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07")
+  ) + labs(title    = paste0("VAT \u2014 Continuous | ", label),
+           subtitle = paste("Hopkins H =", hop_vals$H_continuous))
+
+  cat_data <- split$categorical
+  if (nrow(cat_data) > max_n) {
+    set.seed(seed); cat_data <- cat_data[sample(nrow(cat_data), max_n), ]
+  }
+
+  p_cat <- fviz_dist(
+    daisy(cat_data, metric = "gower"),
+    order = TRUE, show_labels = FALSE,
+    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07")
+  ) + labs(title    = paste0("VAT \u2014 Categorical | ", label),
+           subtitle = paste("Hopkins H =", hop_vals$H_categorical))
+
+  list(vat_continuous = p_cont, vat_categorical = p_cat)
+}
+
+# Create plots folder on load
+if (!dir.exists("plots")) dir.create("plots", recursive = TRUE)
+
+# Save a ggplot object as PNG
+save_plot_gg <- function(plot_obj, filename, path = "plots/",
+                         width = 10, height = 6, dpi = 300) {
+  filepath <- file.path(path, paste0(filename, ".png"))
+  ggsave(filepath, plot  = plot_obj,
+                   width = width,
+                   height = height,
+                   dpi    = dpi,
+                   bg     = "white")
+  cat("Saved:", filepath, "\n")
+  invisible(filepath)
+}
+
+# Save a base R plot expression as PNG
+save_plot_base <- function(plot_expr, filename, path = "plots/",
+                           width = 3000, height = 1800, res = 300) {
+  filepath <- file.path(path, paste0(filename, ".png"))
+  png(filepath, width = width, height = height, res = res)
+  par(mar = c(5, 4, 4, 10))
+  force(plot_expr)
+  dev.off()
+  cat("Saved:", filepath, "\n")
+  invisible(filepath)
+}
+
+# ── Master wrapper ────────────────────────────────────────────────────────────
+analyse_dataset <- function(df, label) {
+  message("Processing: ", label)
+
+  clean_label <- gsub("[^A-Za-z0-9]", "_", label)
+
+  split <- split_vars(df)
+  hops  <- compute_hopkins(split)
+
+  # ── Continuous VAT ─────────────────────────────────────────────────────────
+  cont_data <- split$continuous |> scale() |> as.data.frame()
+  if (nrow(cont_data) > 300) {
+    set.seed(123); cont_data <- cont_data[sample(nrow(cont_data), 300), ]
+  }
+
+  p_cont <- fviz_dist(
+    dist(cont_data, method = "euclidean"),
+    order = TRUE, show_labels = FALSE,
+    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07")
+  ) + labs(title    = paste0("VAT \u2014 Continuous | ", label),
+           subtitle = paste("Hopkins H =", hops$H_continuous))
+
+  # ── Categorical VAT ────────────────────────────────────────────────────────
+  cat_data <- split$categorical
+  if (nrow(cat_data) > 300) {
+    set.seed(123); cat_data <- cat_data[sample(nrow(cat_data), 300), ]
+  }
+
+  p_cat <- fviz_dist(
+    daisy(cat_data, metric = "gower"),
+    order = TRUE, show_labels = FALSE,
+    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07")
+  ) + labs(title    = paste0("VAT \u2014 Categorical | ", label),
+           subtitle = paste("Hopkins H =", hops$H_categorical))
+
+  # Print to document
+  print(p_cont)
+  print(p_cat)
+
+  # Save as PNG
+  save_plot_gg(p_cont, paste0("vat_continuous_", clean_label))
+  save_plot_gg(p_cat,  paste0("vat_categorical_", clean_label))
+
+  list(label = label, hopkins = hops,
+       plots  = list(vat_continuous = p_cont,
+                     vat_categorical = p_cat))
+}
+```
+
+## EDA
+
+### Setup & Load Original Dataset
+
+```{r}
+path0 <- "~/Downloads/MATH 252/Group Project/Raw Data.csv"
+
+raw <- read.csv(path0, na.strings = c("", "NA", "#N/A"))
+
+# Derive price from the paper's definition: price = 1 / multiplier
+# (cost to the dictator of having $1 received by the passive player)
+# Rename using dplyr::rename() with the dotted names read.csv() produces
+raw <- raw |>
+  rename(
+    work_time_main     = WorkTimeInSeconds,
+    work_time_followup = WorkTimeInSeconds.1,
+    political_views    = Q3_1.On.a.scale.of.0.to.100..how.would.you.describe.your.political.views.,
+    religious_views    = Q8_1.On.a.scale.of.0.to.100..how.would.you.describe.your.religious.orientation.,
+    vote_2016          = Q5.In.the.2016.Presidential.election..who.did.you.vote.for.,
+    state              = Q9.What.State.do.you.live.in.,
+    party              = Q7.Do.you.consider.yourself.a.,
+    attendance         = Q8.Aside.from.weddings.and.funerals..how.often.do.you.attend.religious.services.
+  )
+
+# Derive price and gave, retype factors
+raw <- raw |>
+  mutate(
+    price = ifelse(multiplier > 0, 1 / multiplier, NA),
+    gave  = as.integer(amount > 0),
+    age = factor(age,
+      levels  = c("18-29","30-39","40-49","50-59","60-69","70 or over"),
+      ordered = TRUE),
+    income = factor(income,
+      levels  = c("Under $20,000","$20,000 - $39,999","$40,000 - $59,999",
+                  "$60,000 - $79,999","$80,000 - $99,999","Over $100,000"),
+      ordered = TRUE),
+    gender     = factor(gender),
+    party      = factor(party),
+    vote_2016  = factor(vote_2016),
+    attendance = factor(attendance,
+      levels  = c("Never","A few times a year","Once or twice a month",
+                  "Once a week","More than once a week"),
+      ordered = TRUE)
+  )
+```
+
+### Variable Codebook Table
+
+The dataset merges two MTurk HITs. The **main experiment** (Columns 1–15) collected the dictator game decision and basic demographics from 772 subjects. The **follow-up survey** (Columns 16 onward) collected extended political and religious measures from the 505 subjects who responded — indicated by `#N/A` missingness for non-respondents (Lillehaugen et al., 2023, §2.1)
+
+```{r}
+codebook <- tibble(
+  Variable = c(
+    "WorkTimeInSeconds",
+    "multiplier",
+    "amount",
+    "price",
+    "age",
+    "gender",
+    "income",
+    "WorkTimeInSeconds.1",
+    "Q3_1...",
+    "Q8_1...",
+    "Q5...",
+    "Q9...",
+    "Q7...",
+    "Q8.Aside..."
+  ),
+  Type = c(
+    "Continuous","Continuous","Continuous","Continuous",
+    "Ordinal","Nominal","Ordinal",
+    "Continuous","Continuous","Continuous",
+    "Nominal","Nominal","Nominal","Ordinal"
+  ),
+  Description = c(
+    "Seconds to complete the main HIT (data quality indicator)",
+    "Multiplication factor μ ~ Uniform(0,2); shown as 0–200%. Scales the amount received by the passive player",
+    "Dollars sent to passive player [0, 1]; the primary outcome of the dictator game",
+    "Effective price = 1/μ; cost to dictator of the passive player receiving $1 (derived)",
+    "Age bracket of subject (6 ordered levels: 18–29 through 70+)",
+    "Self-reported gender (Male / Female)",
+    "Annual household income bracket (6 ordered levels: Under $20k through Over $100k)",
+    "Seconds to complete the follow-up Qualtrics survey (NA = non-respondent)",
+    "Political views: 0 = Very liberal, 100 = Very conservative (follow-up survey)",
+    "Religious orientation: 0 = Not at all religious, 100 = Very religious (follow-up survey)",
+    "Candidate voted for in the 2016 U.S. presidential election (follow-up survey)",
+    "U.S. state of residence (follow-up survey)",
+    "Political party self-identification (follow-up survey)",
+    "Religious service attendance frequency, excluding weddings/funerals (follow-up survey)"
+  )
+)
+
+kable(codebook, longtable = FALSE,
+      caption   = "Variable Codebook — Raw MTurk Dataset",
+      col.names = c("Variable", "Type", "Description"),
+      booktabs  = TRUE) |>
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                font_size = 9) |>
+  column_spec(3, width = "9cm")
+```
+
+### Sample Attrition Table
+
+Of 922 subjects who accepted the HIT, 772 provided valid main-experiment responses (dropout rate 16.3%). Of those, 505 completed the follow-up survey (response rate 65.4%) (Lillehaugen et al., 2023, §2.2.1).
+
+```{r}
+n_total      <- nrow(raw)
+n_gave_main  <- sum(!is.na(raw$amount))
+n_followup   <- sum(!is.na(raw$q3_1))  # proxy: responded to follow-up
+
+attrition <- tibble(
+  Stage      = c("Accepted HIT (raw)", "Valid main experiment", "Completed follow-up survey"),
+  N          = c(n_total, n_gave_main, n_followup),
+  Pct_prev   = c(NA,
+                 round(n_gave_main / n_total * 100, 1),
+                 round(n_followup  / n_gave_main * 100, 1))
+)
+
+kable(attrition, longtable = FALSE,
+      caption   = "Sample Attrition Across Experiment Stages",
+      col.names = c("Stage", "N", "% of Previous Stage"),
+      digits    = 1,
+      booktabs  = TRUE) |>
+  kable_styling(latex_options = "HOLD_position")
+```
+
+### Continuous Variable Summary Table
+
+The multiplier is the central experimental manipulation. The `amount` variable is the dictator game outcome. `price` is derived as 1/μ per the paper's elasticity models (Eq. 2, §2.2.5)
+
+```{r}
+cont_summary <- raw |>
+  dplyr::select(work_time_main, multiplier, amount, price,
+                political_views, religious_views, work_time_followup) |>
+  pivot_longer(everything(), names_to = "Variable") |>
+  group_by(Variable) |>
+  summarise(
+    N      = sum(!is.na(value)),
+    Mean   = round(mean(value, na.rm = TRUE), 3),
+    SD     = round(sd(value,   na.rm = TRUE), 3),
+    Min    = round(min(value,  na.rm = TRUE), 3),
+    Q1     = round(quantile(value, 0.25, na.rm = TRUE), 3),
+    Median = round(median(value,   na.rm = TRUE), 3),
+    Q3     = round(quantile(value, 0.75, na.rm = TRUE), 3),
+    Max    = round(max(value,  na.rm = TRUE), 3),
+    `NA`   = sum(is.na(value))
+  )
+
+kable(cont_summary, longtable = FALSE,
+      caption  = "Descriptive Statistics — Continuous Variables",
+      booktabs = TRUE) |>
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                font_size = 9)
+```
+
+### Categorical Frequency Table
+
+```{r}
+freq_table <- function(df, var, caption_text) {
+  df |>
+    filter(!is.na(.data[[var]])) |>
+    count(.data[[var]], name = "N") |>
+    mutate(Percent = round(N / sum(N) * 100, 1)) |>
+    rename(Category = 1) |>
+    kable(longtable  = FALSE,
+          caption    = caption_text,
+          col.names  = c("Category", "N", "%"),
+          booktabs   = TRUE) |>
+    kable_styling(latex_options = "HOLD_position")
+}
+
+freq_table(raw, "gender",     "Gender Distribution")
+freq_table(raw, "age",        "Age Distribution")
+freq_table(raw, "income",     "Income Distribution")
+freq_table(raw, "vote_2016",  "2016 Presidential Vote (Follow-up Respondents)")
+freq_table(raw, "party",      "Political Party Affiliation (Follow-up Respondents)")
+freq_table(raw, "attendance", "Religious Service Attendance (Follow-up Respondents)")
+```
+
+### Dictator Game Output Summary
+
+The paper reports that 39.4% of subjects sent \$0, 15.6% sent the full \$1.00, and the mean amount conditional on giving was \$0.55 (§2.2.3). This block reproduces those figures from the raw data.
+
+```{r}
+giving_summary <- raw |>
+  filter(!is.na(amount)) |>
+  summarise(
+    N                  = n(),
+    `Mean Amount Sent` = round(mean(amount), 3),
+    `SD`               = round(sd(amount), 3),
+    `Sent $0 (N)`      = sum(amount == 0),
+    `Sent $0 (%)`      = round(mean(amount == 0) * 100, 1),
+    `Sent $1.00 (N)`   = sum(amount == 1),
+    `Sent $1.00 (%)`   = round(mean(amount == 1) * 100, 1),
+    `Mean Given Gave > 0`  = round(mean(amount[amount > 0]), 3)
+  ) |>
+  pivot_longer(everything(), names_to = "Statistic", values_to = "Value")
+
+kable(giving_summary, longtable = FALSE,
+      caption  = "Dictator Game Giving Behavior Summary",
+      booktabs = TRUE,
+      escape   = FALSE) |>
+  kable_styling(latex_options = "HOLD_position")
+```
+
+### Multiplier(Price) Distribution
+
+Because μ is drawn from Uniform(0, 2), the price 1/μ is right-skewed. This block checks whether the experimental randomization produced a roughly uniform multiplier distribution.
+
+```{r}
+# Binned multiplier distribution
+multiplier_dist <- raw |>
+  filter(!is.na(multiplier)) |>
+  mutate(multiplier_bin = cut(multiplier,
+    breaks = seq(0, 2, by = 0.25),
+    include.lowest = TRUE, right = FALSE)) |>
+  count(multiplier_bin, name = "N") |>
+  mutate(Percent = round(N / sum(N) * 100, 1))
+
+kable(multiplier_dist, longtable = FALSE,
+      caption   = "Distribution of Multiplier (\u03bc) — Binned in 0.25 Intervals",
+      col.names = c("Multiplier Range", "N", "%"),
+      booktabs  = TRUE) |>
+  kable_styling(latex_options = "HOLD_position")
+```
+
+### Mean Amount Sent by Demographic Group
+
+Table 1 in the paper reports correlations between amount sent and demographic group. This block produces the underlying means for replication.Table 1 in the paper reports correlations between amount sent and demographic group. This block produces the underlying means for replication.
+
+```{r}
+# Function: mean amount sent ± SD by a grouping variable
+group_giving <- function(df, group_var, label) {
+  df |>
+    filter(!is.na(amount), !is.na(.data[[group_var]])) |>
+    group_by(Group = as.character(.data[[group_var]])) |>  # coerce to character
+    summarise(
+      N         = n(),
+      Mean_Sent = round(mean(amount), 3),
+      SD        = round(sd(amount), 3),
+      Pct_Gave  = round(mean(gave) * 100, 1)
+    ) |>
+    mutate(Variable = label) |>
+    relocate(Variable)
+}
+
+bind_rows(
+  group_giving(raw, "gender",    "Gender"),
+  group_giving(raw, "age",       "Age"),
+  group_giving(raw, "income",    "Income"),
+  group_giving(raw, "party",     "Party"),
+  group_giving(raw, "vote_2016", "2016 Vote")
+) |>
+  kable(longtable = FALSE,
+        caption   = "Mean Amount Sent and Probability of Giving by Demographic Group",
+        col.names = c("Variable", "Group", "N", "Mean Sent ($)", "SD", "% Gave"),
+        booktabs  = TRUE) |>
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                font_size = 9) |>
+  collapse_rows(columns = 1, latex_hline = "major")
+```
+
+### Missing Data Summary
+
+```{r}
+missing_summary <- raw |>
+  summarise(across(everything(), ~ sum(is.na(.)))) |>
+  pivot_longer(everything(),
+               names_to  = "Variable",
+               values_to = "N_Missing") |>
+  mutate(Pct_Missing = round(N_Missing / nrow(raw) * 100, 1)) |>
+  filter(N_Missing > 0) |>
+  arrange(desc(N_Missing))
+
+kable(missing_summary, longtable = FALSE,
+      caption   = "Missing Data by Variable",
+      col.names = c("Variable", "N Missing", "% Missing"),
+      booktabs  = TRUE) |>
+  kable_styling(latex_options = "HOLD_position")
+```
+
+## Check Cluster Tendency
+
+### Complete Data
+
+```{r}
+path1   <- "~/Downloads/MATH 252/Group Project/processed data/data_complete_baseline.csv"
+complete <- read.csv(path1)
+
+res_complete <- analyse_dataset(complete, label = "Complete Data")
+```
+
+### Complete Baseline
+
+```{r}
+path2        <- "~/Downloads/MATH 252/Group Project/processed data/data_complete.csv"
+complete_base <- read.csv(path2)
+
+res_complete_base <- analyse_dataset(complete_base, label = "Complete Baseline")
+```
+
+### Mean Mode Imputed
+
+```{r}
+path3    <- "~/Downloads/MATH 252/Group Project/processed data/mean_mode_imputed_dataset.csv"
+mean_mode <- read.csv(path3)
+
+res_mean_mode <- analyse_dataset(mean_mode, label = "Mean/Mode Imputed")
+```
+
+### MICE Imputed 1
+
+```{r}
+path4  <- "~/Downloads/MATH 252/Group Project/processed data/mice_imputation_data1.csv"
+mice1  <- read.csv(path4)
+
+res_mice1 <- analyse_dataset(mice1, label = "MICE Imputed 1")
+```
+
+### MICE Imputed 2
+
+```{r}
+path5  <- "~/Downloads/MATH 252/Group Project/processed data/mice_imputation_data2.csv"
+mice2  <- read.csv(path5)
+
+res_mice2 <- analyse_dataset(mice2, label = "MICE Imputed 2")
+```
+
+### KNN Imputed (K=5)
+
+```{r}
+path6  <- "~/Downloads/MATH 252/Group Project/processed data/knn_imputed_data_k5.csv"
+knn_k5 <- read.csv(path6)
+
+res_knn_k5 <- analyse_dataset(knn_k5, label = "KNN Imputed (k=5)")
+```
+
+### KNN Imputed (K=10)
+
+```{r}
+path7   <- "~/Downloads/MATH 252/Group Project/processed data/knn_imputed_data_k10.csv"
+knn_k10 <- read.csv(path7)
+
+res_knn_k10 <- analyse_dataset(knn_k10, label = "KNN Imputed (k=10)")
+```
+
+### Cluster Tendency Summary
+
+```{r}
+hopkins_summary <- map_dfr(
+  list(res_complete, res_complete_base, res_mean_mode,
+       res_mice1, res_mice2, res_knn_k5, res_knn_k10),
+  \(r) tibble(
+    Dataset       = r$label,
+    H_Continuous  = r$hopkins$H_continuous,
+    H_Categorical = r$hopkins$H_categorical
+  )
+)
+
+knitr::kable(
+  hopkins_summary,
+  caption     = "Hopkins Statistic by Dataset and Variable Type",
+  col.names   = c("Dataset", "H (Continuous)", "H (Categorical)"),
+  digits      = 4
+)
+```
+
+## Analysis Time!
+
+come along with me and the butterflies and bees we can wander through the forest and do so as we please
+
+### Additional libraries
+
+```{r}
+library(fclust)         # FKM()
+library(FPDclustering)  # PDC()
+library(MixGHD)         # ARI()
+library(clValid)        # Dunn index
+library(factoextra)     # fviz_nbclust()
+library(cluster)        # silhouette(), agnes(), daisy()
+library(flextable)
+library(magick)
+```
+
+### Data Preparation
+
+```{r}
+# Computes pairwise ARI between datasets within each method
+# all_clust_labels: named list of label lists, one per dataset
+cross_dataset_ari <- function(all_clust_labels) {
+
+  methods      <- c("km", "fkm", "pdc", "hc")
+  method_names <- c("K-Means", "Fuzzy K-Means",
+                    "PD Clustering", "Hierarchical Avg")
+  dataset_names <- names(all_clust_labels)
+  n_datasets    <- length(dataset_names)
+
+  # All pairwise dataset combinations
+  pairs <- combn(dataset_names, 2, simplify = FALSE)
+
+  results <- map_dfr(seq_along(methods), function(m_idx) {
+    method     <- methods[m_idx]
+    method_name <- method_names[m_idx]
+
+    map_dfr(pairs, function(pair) {
+
+      d1 <- pair[1]; d2 <- pair[2]
+      labs1 <- all_clust_labels[[d1]][[method]]
+      labs2 <- all_clust_labels[[d2]][[method]]
+
+      # Align lengths — take minimum if datasets differ in size
+      min_n <- min(length(labs1), length(labs2))
+      ari_val <- tryCatch(
+        ARI(labs1[1:min_n], labs2[1:min_n]),
+        error = function(e) NA_real_
+      )
+
+      tibble(
+        Method     = method_name,
+        Dataset_1  = d1,
+        Dataset_2  = d2,
+        ARI        = round(ari_val, 4)
+      )
+    })
+  })
+
+  results
+}
+
+# Save a kable table as a PNG file
+# Returns the filepath for reference
+save_table_png <- function(data, filename, caption_text, 
+                           path = "tables/",
+                           group_col = NULL,    # column name to group by
+                           group_size = NULL) { # rows per group
+
+  if (!dir.exists(path)) dir.create(path, recursive = TRUE)
+  filepath <- file.path(path, paste0(filename, ".png"))
+
+  df <- as.data.frame(data)
+
+  ft <- flextable::flextable(df) |>
+    flextable::set_caption(caption_text) |>
+    flextable::theme_booktabs() |>
+    flextable::fontsize(size = 11, part = "all") |>
+    flextable::font(fontname = "Times New Roman", part = "all") |>
+    flextable::bold(part = "header") |>
+    flextable::autofit()
+
+  # ── Add dataset group separators if requested ─────────────────────────────
+  if (!is.null(group_col) && !is.null(group_size)) {
+
+    n_groups    <- length(unique(df[[group_col]]))
+    group_names <- unique(df[[group_col]])
+    n_rows      <- nrow(df)
+
+    # Add thick border line between each dataset group
+    for (i in 1:(n_groups - 1)) {
+      sep_row <- i * group_size
+      ft <- ft |>
+        flextable::hline(i         = sep_row,
+                         border    = officer::fp_border(width = 1.5),
+                         part      = "body")
+    }
+
+    # Bold the first row of each group and add group label in background
+    for (i in 1:n_groups) {
+      first_row <- (i - 1) * group_size + 1
+      ft <- ft |>
+        flextable::bold(i = first_row, part = "body") |>
+        flextable::bg(i   = seq(first_row,
+                                first_row + group_size - 1),
+                      bg  = ifelse(i %% 2 == 0,
+                                   "#F5F5F5", "#FFFFFF"),  # alternating shading per group
+                      part = "body")
+    }
+
+    # Hide the group column from display (already encoded in grouping)
+    ft <- ft |>
+      flextable::bold(j = group_col, part = "body") |>
+      flextable::color(j     = group_col,
+                       color = "#2C3E50",
+                       part  = "body")
+  }
+
+  flextable::save_as_image(ft, path = filepath, res = 300)
+  cat("Saved:", filepath, "\n")
+  invisible(filepath)
+}
+
+# Extract and scale continuous variables for clustering
+# Mirrors the split_vars() logic already defined above
+prep_cluster_data <- function(df) {
+  df |>
+    dplyr::select(
+      starts_with("work_time_in_seconds"),
+      multiplier,
+      amount,
+      starts_with("q3_1"),
+      starts_with("q8_1")
+    ) |>
+    drop_na() |>
+    mutate(across(everything(), as.numeric)) |>
+    scale() |>
+    as.data.frame()
+}
+
+dataset_list <- list(
+  list(df = complete,       label = "Complete Data"),
+  list(df = complete_base,  label = "Complete Baseline"),
+  list(df = mean_mode,      label = "Mean/Mode Imputed"),
+  list(df = mice1,          label = "MICE Imputed 1"),
+  list(df = mice2,          label = "MICE Imputed 2"),
+  list(df = knn_k5,         label = "KNN k=5"),
+  list(df = knn_k10,        label = "KNN k=10")
+)
+```
+
+### CH Index Function
+
+Taken directly from Dr. Tortora's lecture (kmeans.r, lines 4–18).
+
+```{r}
+# Calinski-Harabasz ratio — from lecture kmeans.r
+ratio.strength <- function(X, G, output) {
+  n   <- nrow(X)
+  sst <- cov.wt(X)$cov * (n - 1)
+  ssw <- 0
+  for (g in 1:G) {
+    mu.g      <- output$centers[g, ]
+    partition <- which(g == output$cluster)
+    ng        <- length(partition)
+    ssw       <- ssw + cov.wt(X[partition, ], center = mu.g)$cov * (ng - 1)
+  }
+  ssb <- sst - ssw
+  val <- (sum(diag(ssb)) * (n - G)) / (sum(diag(ssw)) * (G - 1))
+  return(val)
+}
+```
+
+### Optimal K: Gap Statistic and Silhouette
+
+Follows `fviz_nbclust()` usage from lecture (clustervalidation.R, lines 33–45). The `FKM2` wrapper is taken directly from Dr. Tortora's lecture (clustervalidation.R, lines 39–43).
+
+```{r}
+#| fig-height: 5
+#| fig-width: 8
+#| fig-keep: all
+
+FKM2 <- function(data, k) {
+  res    <- FKM(data, k)
+  output <- list(cluster = as.vector(res$clus[, 1]))
+  return(output)
+}
+
+# Extract optimal K from average silhouette width
+# Returns the k in 2:k_max with highest mean silhouette
+optimal_k_silhouette <- function(data, FUN, k_max = 8, seed = 420, m = 2) {
+  set.seed(seed)
+  dist_mat  <- dist(data, method = "euclidean")
+  sil_scores <- rep(NA, k_max)
+
+  for (k in 2:k_max) {
+    set.seed(seed)
+    clust <- FUN(data, k)
+    sil_scores[k] <- mean(silhouette(clust$cluster, dist_mat)[, 3])
+  }
+  which.max(sil_scores)
+}
+
+# Extract optimal K from gap statistic
+# Returns the k selected by firstSEmax criterion
+optimal_k_gap <- function(data, FUN, k_max = 8, seed = 420) {
+  set.seed(seed)
+  gap_res <- clusGap(data, FUNcluster = FUN,
+                     K.max = k_max, B = 50, verbose = FALSE)
+  maxSE(gap_res$Tab[, "gap"], gap_res$Tab[, "SE.sim"],
+        method = "firstSEmax")
+}
+
+# PD Clustering wrapper for clusGap and silhouette
+PDC2 <- function(data, k) {
+  res    <- PDC(data, k = k)
+  output <- list(cluster = as.integer(res$label))
+  return(output)
+}
+
+# Hierarchical average wrapper
+HC2 <- function(data, k) {
+  hc  <- agnes(data, method = "average")
+  cut <- cutree(as.hclust(hc), k = k)
+  list(cluster = as.integer(cut))
+}
+
+# Get optimal K for all four methods on one dataset
+# Uses silhouette as primary criterion (interpretable across all methods)
+get_optimal_k <- function(data, label, k_max = 8, seed = 420) {
+  
+  clean_label <- gsub("[^A-Za-z0-9]", "_", label)
+  set.seed(seed)
+
+  cat("  Computing optimal K — K-Means...\n")
+  k_km  <- optimal_k_silhouette(data,
+              FUN = function(d, k) {
+                set.seed(seed)
+                list(cluster = kmeans(d, centers = k, nstart = 50)$cluster)
+              },
+              k_max = k_max, seed = seed)
+
+  cat("  Computing optimal K — Fuzzy K-Means...\n")
+  k_fkm <- optimal_k_silhouette(data,
+              FUN = function(d, k) {
+                set.seed(seed)
+                list(cluster = as.integer(FKM(d, k = k, m = 2)$clus[, 1]))
+              },
+              k_max = k_max, seed = seed)
+
+  cat("  Computing optimal K — PD Clustering...\n")
+  k_pdc <- optimal_k_silhouette(data,
+              FUN = function(d, k) PDC2(d, k),
+              k_max = k_max, seed = seed)
+
+  cat("  Computing optimal K — Hierarchical Avg...\n")
+  k_hc  <- optimal_k_silhouette(data,
+              FUN = function(d, k) HC2(d, k),
+              k_max = k_max, seed = seed)
+
+  # ── Gap statistic plots ───────────────────────────────────────────────────
+  set.seed(seed)
+  p_gap_km <- fviz_nbclust(data, kmeans, method = "gap_stat",
+                            k.max = k_max, nboot = 50) +
+    labs(title = paste("Gap Statistic — K-Means |", label))
+
+  set.seed(seed)
+  p_gap_fkm <- fviz_nbclust(data, FKM2, method = "gap_stat",
+                             k.max = k_max, nboot = 50) +
+    labs(title = paste("Gap Statistic — Fuzzy K-Means |", label))
+
+  # ── Average silhouette width plots ────────────────────────────────────────
+  p_sil_km <- fviz_nbclust(data, kmeans, method = "silhouette",
+                            k.max = k_max) +
+    labs(title = paste("Avg Silhouette Width — K-Means |", label))
+
+  p_sil_fkm <- fviz_nbclust(data, FKM2, method = "silhouette",
+                             k.max = k_max) +
+    labs(title = paste("Avg Silhouette Width — Fuzzy K-Means |", label))
+
+  # Print to document
+  print(p_gap_km);  print(p_gap_fkm)
+  print(p_sil_km);  print(p_sil_fkm)
+
+  # Save as PNG
+  save_plot_gg(p_gap_km,  paste0("gap_kmeans_",      clean_label))
+  save_plot_gg(p_gap_fkm, paste0("gap_fkm_",         clean_label))
+  save_plot_gg(p_sil_km,  paste0("avgSil_kmeans_",   clean_label))
+  save_plot_gg(p_sil_fkm, paste0("avgSil_fkm_",      clean_label))
+
+  list(k_km = k_km, k_fkm = k_fkm, k_pdc = k_pdc, k_hc = k_hc)
+}
+```
+
+### Clustering Functions
+
+Following patterns from kmeans.r (line 82), Fuzzy.R (lines 12–31), and PAM.R (line 85).
+
+```{r}
+run_clustering <- function(data, optimal_ks, seed = 420) {
+  set.seed(seed)
+
+  # K-Means with its own optimal K
+  km  <- kmeans(data, centers = optimal_ks$k_km,  nstart = 10)
+
+  # Fuzzy K-Means with its own optimal K
+  fkm <- FKM(X = data, k = optimal_ks$k_fkm, m = 2)
+
+  # PD Clustering with its own optimal K
+  pdc <- PDC(data, k = optimal_ks$k_pdc)
+
+  # Hierarchical Average with its own optimal K
+  hc     <- agnes(data, method = "average")
+  hc_cut <- cutree(as.hclust(hc), k = optimal_ks$k_hc)
+
+  list(km = km, fkm = fkm, pdc = pdc, hc = hc, hc_cut = hc_cut,
+       optimal_ks = optimal_ks,
+       labels = list(
+         km  = as.integer(km$cluster),
+         fkm = as.integer(fkm$clus[, 1]),
+         pdc = as.integer(pdc$label),
+         hc  = as.integer(hc_cut)
+       ))
+}
+```
+
+### Internal Validation Function
+
+Silhouette and CH from lecture (kmeans.r lines 85, 16). Dunn index via `clValid` (clustervalidation.R line 54). Agglomerative Coefficient from `agnes` object.
+
+```{r}
+internal_validation <- function(data, clust_out, label) {
+
+  dist_mat <- dist(data, method = "euclidean")
+  ks       <- clust_out$optimal_ks
+
+  # ── Silhouette ────────────────────────────────────────────────────────────
+  sil_km  <- silhouette(clust_out$km$cluster,    dist_mat)
+  sil_fkm <- silhouette(clust_out$fkm$clus[, 1], dist_mat)
+  sil_pdc <- silhouette(clust_out$pdc$label,      dist_mat)
+  sil_hc  <- silhouette(clust_out$hc_cut,         dist_mat)
+
+  # ── CH Index ──────────────────────────────────────────────────────────────
+  hc_centers <- do.call(rbind, lapply(unique(clust_out$hc_cut), function(g)
+    colMeans(data[clust_out$hc_cut == g, , drop = FALSE])))
+
+  ch_km  <- ratio.strength(data, ks$k_km,
+               list(centers = clust_out$km$centers,
+                    cluster  = clust_out$km$cluster))
+  ch_fkm <- ratio.strength(data, ks$k_fkm,
+               list(centers = clust_out$fkm$H,
+                    cluster  = clust_out$fkm$clus[, 1]))
+  ch_pdc <- ratio.strength(data, ks$k_pdc,
+               list(centers = clust_out$pdc$center,
+                    cluster  = clust_out$pdc$label))
+  ch_hc  <- ratio.strength(data, ks$k_hc,
+               list(centers = hc_centers,
+                    cluster  = clust_out$hc_cut))
+
+  # ── Dunn Index ────────────────────────────────────────────────────────────
+  dunn_km  <- dunn(dist_mat, clust_out$km$cluster)
+  dunn_fkm <- dunn(dist_mat, clust_out$fkm$clus[, 1])
+  dunn_pdc <- dunn(dist_mat, clust_out$pdc$label)
+  dunn_hc  <- dunn(dist_mat, clust_out$hc_cut)
+
+  # ── Agglomerative Coefficient ─────────────────────────────────────────────
+  ac <- clust_out$hc$ac
+
+  # ── Results Table — K column added ───────────────────────────────────────
+  results <- tibble(
+    Method     = c("K-Means", "Fuzzy K-Means", "PD Clustering", "Hierarchical Avg"),
+    K          = c(ks$k_km, ks$k_fkm, ks$k_pdc, ks$k_hc),
+    Silhouette = round(c(mean(sil_km[, 3]),  mean(sil_fkm[, 3]),
+                         mean(sil_pdc[, 3]), mean(sil_hc[, 3])), 4),
+    CH_Index   = round(c(ch_km, ch_fkm, ch_pdc, ch_hc), 4),
+    Dunn_Index = round(c(dunn_km, dunn_fkm, dunn_pdc, dunn_hc), 4),
+    Agg_Coef   = c(NA, NA, NA, round(ac, 4))
+  )
+
+# ── Silhouette Plots ──────────────────────────────────────────────────────
+  clean_label <- gsub("[^A-Za-z0-9]", "_", label)
+
+  sil_list <- list(
+    list(sil = sil_km,  col = "steelblue", method = "KMeans",
+         k = ks$k_km),
+    list(sil = sil_fkm, col = "tomato",    method = "FuzzyKMeans",
+         k = ks$k_fkm),
+    list(sil = sil_pdc, col = "darkgreen", method = "PDClustering",
+         k = ks$k_pdc),
+    list(sil = sil_hc,  col = "purple",    method = "HierarchicalAvg",
+         k = ks$k_hc)
+  )
+
+  for (sp in sil_list) {
+    title_text <- paste0(gsub("([A-Z])", " \\1", sp$method),
+                         " Silhouette | k=", sp$k, " | ", label)
+    filename   <- paste0("sil_", sp$method, "_k", sp$k, "_", clean_label)
+
+    # Save PNG
+    save_plot_base(
+      plot(sp$sil, main = title_text, col = sp$col),
+      filename = filename
+    )
+
+    # Also render in document
+    par(mar = c(5, 4, 4, 10))
+    plot(sp$sil, main = title_text, col = sp$col)
+  }
+
+  par(mar = c(5, 4, 4, 2))
+   # ── Return results and silhouette objects ─────────────────────────────────
+  invisible(list(
+    results = results,
+    sils    = list(km  = sil_km,
+                   fkm = sil_fkm,
+                   pdc = sil_pdc,
+                   hc  = sil_hc),
+    ks      = ks
+  ))
+}
+```
+
+### External Validation: ARI
+
+ARI used as external measure comparing clustering methods against each other, following lecture PAM.R (line 118) using `MixGHD::ARI()`.
+
+```{r}
+# ARI pairwise comparison across methods — PAM.R line 118
+ari_comparison <- function(clust_out, label) {
+
+  km_cl  <- clust_out$km$cluster
+  fkm_cl <- clust_out$fkm$clus[, 1]
+  pdc_cl <- clust_out$pdc$label
+  hc_cl  <- clust_out$hc_cut
+
+  ari_table <- tibble(
+    Comparison              = c("K-Means vs Fuzzy K-Means",
+                                "K-Means vs PD Clustering",
+                                "K-Means vs Hierarchical",
+                                "Fuzzy K-Means vs PD Clustering",
+                                "Fuzzy K-Means vs Hierarchical",
+                                "PD Clustering vs Hierarchical"),
+    ARI = round(c(
+      ARI(km_cl,  fkm_cl),
+      ARI(km_cl,  pdc_cl),
+      ARI(km_cl,  hc_cl),
+      ARI(fkm_cl, pdc_cl),
+      ARI(fkm_cl, hc_cl),
+      ARI(pdc_cl, hc_cl)
+    ), 4)
+  )
+
+  cat("\n=== ARI Table —", label, "===\n")
+
+  # print(
+  #   kable(ari_table, longtable = FALSE,
+  #         caption  = paste("Pairwise ARI Between Clustering Methods —", label),
+  #         booktabs = TRUE) |>
+  #     kable_styling(latex_options = "HOLD_position")
+  # )
+
+  invisible(ari_table)
+}
+```
+
+### Master Loop: Run Everything Per Dataset
+
+```{r}
+all_internal <- list()
+all_ari      <- list()
+all_sils     <- list()
+all_clust_labels <- list()
+
+for (d in dataset_list) {
+  cat("\n\nProcessing:", d$label, "\n")
+
+  data       <- prep_cluster_data(d$df)
+  optimal_ks <- get_optimal_k(data, label = d$label, k_max = 8)
+
+  cat("  Optimal K — KM:", optimal_ks$k_km,
+      "| FKM:", optimal_ks$k_fkm,
+      "| PDC:", optimal_ks$k_pdc,
+      "| HC:",  optimal_ks$k_hc, "\n")
+
+  clust_out    <- run_clustering(data, optimal_ks)
+  
+  # Store cluster labels for cross-dataset ARI
+  all_clust_labels[[d$label]] <- clust_out$labels
+  
+  int_res_full <- internal_validation(data, clust_out, d$label)
+  ari_res      <- ari_comparison(clust_out, d$label)
+
+  # Clean label for use in filenames — remove spaces and special chars
+  clean_label <- gsub("[^A-Za-z0-9]", "_", d$label)
+
+# ── Internal validation table ─────────────────────────────────────────────
+  int_kable <- kable(int_res_full$results, longtable = FALSE,
+                     caption  = paste("Internal Validation Measures —", d$label),
+                     booktabs = TRUE) |>
+    kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                  font_size = 9)
+
+  int_kable |> print()
+  save_table_png(data         = int_res_full$results,
+                 filename     = paste0("internal_validation_", clean_label),
+                 caption_text = paste("Internal Validation Measures —", d$label))
+
+  # ── ARI table ─────────────────────────────────────────────────────────────
+  ari_kable <- kable(ari_res, longtable = FALSE,
+                     caption  = paste("Pairwise ARI —", d$label),
+                     booktabs = TRUE) |>
+    kable_styling(latex_options = "HOLD_position")
+
+  ari_kable |> print()
+  save_table_png(data         = ari_res,
+                 filename     = paste0("ari_", clean_label),
+                 caption_text = paste("Pairwise ARI —", d$label))
+
+  all_internal[[d$label]] <- int_res_full$results |> mutate(Dataset = d$label)
+  all_ari[[d$label]]      <- ari_res              |> mutate(Dataset = d$label)
+  all_sils[[d$label]]     <- list(sils  = int_res_full$sils,
+                                  ks    = int_res_full$ks,
+                                  label = d$label)
+}
+```
+
+```{r}
+#| fig-height: 5
+#| fig-width: 9
+#| fig-keep: all
+#| out-width: "95%"
+
+for (s in all_sils) {
+  ks    <- s$ks
+  label <- s$label
+
+  par(mar = c(5, 4, 4, 10))
+  plot(s$sils$km,
+       main = paste0("K-Means Silhouette | k=", ks$k_km, " | ", label),
+       col  = "steelblue")
+
+  par(mar = c(5, 4, 4, 10))
+  plot(s$sils$fkm,
+       main = paste0("Fuzzy K-Means Silhouette | k=", ks$k_fkm, " | ", label),
+       col  = "tomato")
+
+  par(mar = c(5, 4, 4, 10))
+  plot(s$sils$pdc,
+       main = paste0("PD Clustering Silhouette | k=", ks$k_pdc, " | ", label),
+       col  = "darkgreen")
+
+  par(mar = c(5, 4, 4, 10))
+  plot(s$sils$hc,
+       main = paste0("Hierarchical Avg Silhouette | k=", ks$k_hc, " | ", label),
+       col  = "purple")
+}
+
+par(mar = c(5, 4, 4, 2))  # reset margins
+```
+
+### Cross-Dataset Summary Tables
+
+\newpage
+
+```{r}
+#| results: asis
+
+# ── Internal validation summary ───────────────────────────────────────────────
+int_summary_data <- bind_rows(all_internal) |> relocate(Dataset)
+
+int_summary_data |>
+  kable(longtable = FALSE,
+        caption   = "Internal Validation Summary Across All Datasets",
+        booktabs  = TRUE,
+        digits    = 4) |>
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                font_size = 9) |>
+  # Group rows by dataset label instead of collapse_rows
+  group_rows(index = setNames(
+    rep(4, length(unique(int_summary_data$Dataset))),
+    unique(int_summary_data$Dataset)
+  )) |>
+  print()
+
+save_table_png(
+  data         = int_summary_data,
+  filename     = "internal_validation_summary_all",
+  caption_text = "Internal Validation Summary Across All Datasets",
+  group_col    = "Dataset",
+  group_size   = 4          # 4 methods per dataset
+)
+
+# ── ARI summary ───────────────────────────────────────────────────────────────
+ari_summary_data <- bind_rows(all_ari) |> relocate(Dataset)
+
+ari_summary_data |>
+  kable(longtable = FALSE,
+        caption   = "Pairwise ARI Summary Across All Datasets",
+        booktabs  = TRUE,
+        digits    = 4) |>
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                font_size = 9) |>
+  # Group rows by dataset label instead of collapse_rows
+  group_rows(index = setNames(
+    rep(6, length(unique(ari_summary_data$Dataset))),
+    unique(ari_summary_data$Dataset)
+  )) |>
+  print()
+
+save_table_png(
+  data         = ari_summary_data,
+  filename     = "ari_summary_all",
+  caption_text = "Pairwise ARI Summary Across All Datasets",
+  group_col    = "Dataset",
+  group_size   = 6          # 6 comparisons per dataset
+)
+```
+
+```{r}
+#| results: asis
+
+# ── Cross-dataset ARI within each method — long format ───────────────────────
+cross_ari_data <- cross_dataset_ari(all_clust_labels) |>
+  mutate(Comparison = paste0(Dataset_1, " vs ", Dataset_2)) |>
+  dplyr::select(Method, Comparison, ARI)
+
+n_pairs   <- length(unique(cross_ari_data$Comparison))
+n_methods <- length(unique(cross_ari_data$Method))
+
+# ── Print to PDF grouped by method ───────────────────────────────────────────
+cross_ari_data |>
+  kable(longtable = FALSE,
+        caption   = "Cross-Dataset ARI Within Each Clustering Method",
+        booktabs  = TRUE,
+        digits    = 4,
+        col.names = c("Method", "Dataset Comparison", "ARI")) |>
+  kable_styling(latex_options = c("HOLD_position", "scale_down"),
+                font_size     = 9) |>
+  group_rows(index = setNames(
+    rep(n_pairs, n_methods),
+    unique(cross_ari_data$Method)
+  )) |>
+  print()
+
+# ── Save one PNG per method to keep tables readable ──────────────────────────
+for (m in unique(cross_ari_data$Method)) {
+
+  method_data  <- cross_ari_data |>
+    filter(Method == m) |>
+    dplyr::select(Comparison, ARI)
+
+  clean_method <- gsub("[^A-Za-z0-9]", "_", m)
+
+  save_table_png(
+    data         = method_data,
+    filename     = paste0("cross_dataset_ari_", clean_method),
+    caption_text = paste("Cross-Dataset ARI —", m)
+  )
+}
+```
