@@ -1,0 +1,7 @@
+dataset,file,rows,columns,total_missing
+Baseline,data_complete_baseline.csv,519,14,10
+KNN k=5,knn_imputed_data_k5.csv,792,14,0
+KNN k=10,knn_imputed_data_k10.csv,792,14,0
+Mean/Mode,mean_mode_imputed_dataset.csv,792,14,0
+MICE 1,mice_imputation_data1.csv,792,14,0
+MICE 2,mice_imputation_data2.csv,792,14,0

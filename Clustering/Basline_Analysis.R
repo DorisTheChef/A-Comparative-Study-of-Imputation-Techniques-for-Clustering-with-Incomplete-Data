@@ -564,3 +564,126 @@ cluster_sizes <- list(
 )
 
 cluster_sizes
+
+# =========================
+# 8. Baseline cluster profile comparison plot
+#    Cluster labels are oriented so Cluster 2 has the higher
+#    average religious orientation within each method.
+# =========================
+library(ggplot2)
+library(tidyr)
+
+profile_df <- df_mixed %>%
+  mutate(
+    Age = as.numeric(age),
+    Amt = as.numeric(amount),
+    Attend = as.numeric(Q8.Aside.from.weddings.and.funerals..how.often.do.you.attend.religious.services.),
+    Pol = as.numeric(Q3_1.On.a.scale.of.0.to.100..how.would.you.describe.your.political.views.),
+    Rel = as.numeric(Q8_1.On.a.scale.of.0.to.100..how.would.you.describe.your.religious.orientation.),
+    Vote = as.numeric(Q5.In.the.2016.Presidential.election..who.did.you.vote.for.)
+  ) %>%
+  select(Age, Amt, Attend, Pol, Rel, Vote)
+
+profile_variables <- c("Age", "Amt", "Attend", "Pol", "Rel", "Vote")
+
+profile_long <- lapply(names(cluster_list), function(method_name) {
+  tmp <- profile_df
+  tmp$raw_cluster <- cluster_list[[method_name]]
+
+  religion_means <- tapply(tmp$Rel, tmp$raw_cluster, mean, na.rm = TRUE)
+  high_religion_cluster <- names(which.max(religion_means))
+
+  tmp %>%
+    mutate(
+      Method = method_name,
+      Cluster = ifelse(
+        as.character(raw_cluster) == high_religion_cluster,
+        "Cluster 2",
+        "Cluster 1"
+      )
+    ) %>%
+    select(Method, Cluster, all_of(profile_variables))
+}) %>%
+  bind_rows()
+
+profile_average <- profile_long %>%
+  pivot_longer(
+    cols = all_of(profile_variables),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  group_by(Method, Cluster, Variable) %>%
+  summarise(Average = mean(Value, na.rm = TRUE), .groups = "drop")
+
+profile_difference <- profile_average %>%
+  pivot_wider(names_from = Cluster, values_from = Average) %>%
+  mutate(
+    Difference = `Cluster 2` - `Cluster 1`,
+    Direction = ifelse(Difference >= 0, "Cluster 2 higher", "Cluster 1 higher")
+  )
+
+difference_plot <- ggplot(
+  profile_difference,
+  aes(x = Difference, y = Method, fill = Direction)
+) +
+  geom_col() +
+  geom_vline(xintercept = 0, linewidth = 0.4) +
+  facet_wrap(~ Variable, scales = "free_x", ncol = 3) +
+  scale_fill_manual(
+    values = c("Cluster 2 higher" = "#4C9F70", "Cluster 1 higher" = "#D2691E")
+  ) +
+  labs(
+    title = "Difference Between Cluster 2 and Cluster 1 by Method",
+    subtitle = "Positive means Cluster 2 has a higher average than Cluster 1",
+    x = "Cluster 2 average - Cluster 1 average",
+    y = "Method",
+    fill = "Direction"
+  ) +
+  theme_minimal()
+
+average_plot <- ggplot(
+  profile_average,
+  aes(x = Method, y = Average, fill = Cluster)
+) +
+  geom_col() +
+  facet_grid(Variable ~ Cluster, scales = "free_y") +
+  scale_fill_manual(values = c("Cluster 1" = "#D2691E", "Cluster 2" = "#4C9F70")) +
+  labs(
+    title = "Cluster Average Values by Method",
+    x = "Method",
+    y = "Average value",
+    fill = "Cluster"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+dir.create("Clustering/outputs", recursive = TRUE, showWarnings = FALSE)
+
+if (requireNamespace("gridExtra", quietly = TRUE)) {
+  png(
+    filename = "Clustering/outputs/baseline_cluster_profile_comparison_R.png",
+    width = 1800,
+    height = 850,
+    res = 160
+  )
+  gridExtra::grid.arrange(difference_plot, average_plot, ncol = 2, widths = c(1, 1.35))
+  dev.off()
+} else {
+  ggsave(
+    "Clustering/outputs/baseline_cluster_profile_difference_R.png",
+    difference_plot,
+    width = 9,
+    height = 6,
+    dpi = 200
+  )
+  ggsave(
+    "Clustering/outputs/baseline_cluster_profile_average_R.png",
+    average_plot,
+    width = 10,
+    height = 7,
+    dpi = 200
+  )
+}
+
+difference_plot
+average_plot
